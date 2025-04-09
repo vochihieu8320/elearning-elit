@@ -1,0 +1,675 @@
+import { 
+  users, type User, type InsertUser,
+  categories, type Category, type InsertCategory,
+  courses, type Course, type InsertCourse,
+  sections, type Section, type InsertSection,
+  lessons, type Lesson, type InsertLesson,
+  enrollments, type Enrollment, type InsertEnrollment,
+  reviews, type Review, type InsertReview,
+  userLessonProgress, type UserLessonProgress, type InsertUserLessonProgress,
+  orders, type Order, type InsertOrder
+} from "@shared/schema";
+import { db } from "./db";
+import { eq, and, like, desc, sql, count, sum, not, gte, lte, or, asc, isNotNull } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
+
+export interface IStorage {
+  // Users
+  getUser(id: number): Promise<User | undefined>;
+  getUserByUsername(username: string): Promise<User | undefined>;
+  createUser(user: InsertUser): Promise<User>;
+  updateUserStatus(id: number, isActive: boolean): Promise<User>;
+  getUsers(options: { 
+    page: number;
+    limit: number;
+    search?: string;
+    role?: string;
+    isActive?: boolean;
+  }): Promise<{ users: User[]; total: number }>;
+
+  // Categories
+  getAllCategories(): Promise<Category[]>;
+  getCategory(id: number): Promise<Category | undefined>;
+  getCategoryBySlug(slug: string): Promise<Category | undefined>;
+  createCategory(category: InsertCategory): Promise<Category>;
+
+  // Courses
+  getAllCourses(): Promise<Course[]>;
+  getFeaturedCourses(): Promise<Course[]>;
+  getLatestCourses(): Promise<Course[]>;
+  getCourse(id: number): Promise<Course | undefined>;
+  getCourseBySlug(slug: string): Promise<Course | undefined>;
+  createCourse(course: InsertCourse): Promise<Course>;
+  updateCourse(id: number, course: Partial<InsertCourse>): Promise<Course>;
+  deleteCourse(id: number): Promise<void>;
+  incrementCourseStudents(courseId: number): Promise<void>;
+  getAdminCourses(options: {
+    page: number;
+    limit: number;
+    search?: string;
+    isApproved?: boolean;
+    isPublished?: boolean;
+  }): Promise<{ courses: Course[]; total: number }>;
+
+  // Sections and Lessons
+  getCourseSections(courseId: number): Promise<Section[]>;
+  
+  // Reviews
+  getCourseReviews(courseId: number): Promise<Review[]>;
+  getUserCourseReview(userId: number, courseId: number): Promise<Review | undefined>;
+  getUserReviews(userId: number): Promise<Review[]>;
+  createReview(review: InsertReview): Promise<Review>;
+
+  // Enrollments
+  getUserEnrollments(userId: number): Promise<Enrollment[]>;
+  getUserCourseEnrollment(userId: number, courseId: number): Promise<Enrollment | undefined>;
+  createEnrollment(enrollment: InsertEnrollment): Promise<Enrollment>;
+
+  // Progress
+  getUserRecentProgress(userId: number): Promise<any[]>;
+  
+  // Orders
+  getUserOrders(userId: number): Promise<Order[]>;
+  createOrder(order: InsertOrder): Promise<Order>;
+  getRecentOrders(): Promise<Order[]>;
+
+  // Admin stats
+  getAdminStats(): Promise<{
+    usersCount: number;
+    coursesCount: number;
+    ordersCount: number;
+    revenue: number;
+    usersChange: number;
+    coursesChange: number;
+    ordersChange: number;
+    revenueChange: number;
+  }>;
+  getRevenueByMonth(year: number): Promise<{ name: string; value: number }[]>;
+
+  // Testimonials
+  getTestimonials(): Promise<any[]>;
+}
+
+export class DatabaseStorage implements IStorage {
+  // Users
+  async getUser(id: number): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user || undefined;
+  }
+
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user || undefined;
+  }
+
+  async createUser(userData: InsertUser): Promise<User> {
+    const [user] = await db.insert(users).values(userData).returning();
+    return user;
+  }
+
+  async updateUserStatus(id: number, isActive: boolean): Promise<User> {
+    const [updatedUser] = await db
+      .update(users)
+      .set({ isActive })
+      .where(eq(users.id, id))
+      .returning();
+    return updatedUser;
+  }
+
+  async getUsers(options: { 
+    page: number;
+    limit: number;
+    search?: string;
+    role?: string;
+    isActive?: boolean;
+  }): Promise<{ users: User[]; total: number }> {
+    const { page, limit, search, role, isActive } = options;
+    const offset = (page - 1) * limit;
+    
+    let query = db.select().from(users);
+    let countQuery = db.select({ count: count() }).from(users);
+    
+    // Apply filters
+    const conditions = [];
+    
+    if (search) {
+      conditions.push(
+        or(
+          like(users.username, `%${search}%`),
+          like(users.fullName, `%${search}%`),
+          like(users.email, `%${search}%`)
+        )
+      );
+    }
+    
+    if (role) {
+      conditions.push(eq(users.role, role));
+    }
+    
+    if (typeof isActive === 'boolean') {
+      conditions.push(eq(users.isActive, isActive));
+    }
+    
+    if (conditions.length > 0) {
+      const whereClause = conditions.reduce((acc, condition) => and(acc, condition));
+      query = query.where(whereClause);
+      countQuery = countQuery.where(whereClause);
+    }
+    
+    // Get total count
+    const [{ count: total }] = await countQuery;
+    
+    // Get users with pagination
+    const userList = await query
+      .orderBy(desc(users.createdAt))
+      .limit(limit)
+      .offset(offset);
+    
+    return {
+      users: userList,
+      total: Number(total),
+    };
+  }
+
+  // Categories
+  async getAllCategories(): Promise<Category[]> {
+    return db.select().from(categories);
+  }
+
+  async getCategory(id: number): Promise<Category | undefined> {
+    const [category] = await db.select().from(categories).where(eq(categories.id, id));
+    return category || undefined;
+  }
+
+  async getCategoryBySlug(slug: string): Promise<Category | undefined> {
+    const [category] = await db.select().from(categories).where(eq(categories.slug, slug));
+    return category || undefined;
+  }
+
+  async createCategory(categoryData: InsertCategory): Promise<Category> {
+    const [category] = await db.insert(categories).values(categoryData).returning();
+    return category;
+  }
+
+  // Courses
+  async getAllCourses(): Promise<Course[]> {
+    return db.select()
+      .from(courses)
+      .where(and(
+        eq(courses.isPublished, true),
+        eq(courses.isApproved, true)
+      ));
+  }
+
+  async getFeaturedCourses(): Promise<Course[]> {
+    return db.select()
+      .from(courses)
+      .where(and(
+        eq(courses.isPublished, true),
+        eq(courses.isApproved, true),
+        eq(courses.isFeatured, true)
+      ))
+      .limit(6);
+  }
+
+  async getLatestCourses(): Promise<Course[]> {
+    return db.select()
+      .from(courses)
+      .where(and(
+        eq(courses.isPublished, true),
+        eq(courses.isApproved, true)
+      ))
+      .orderBy(desc(courses.createdAt))
+      .limit(6);
+  }
+
+  async getCourse(id: number): Promise<Course | undefined> {
+    const [course] = await db.select().from(courses).where(eq(courses.id, id));
+    return course || undefined;
+  }
+
+  async getCourseBySlug(slug: string): Promise<Course | undefined> {
+    const [course] = await db.select().from(courses).where(eq(courses.slug, slug));
+    return course || undefined;
+  }
+
+  async createCourse(courseData: InsertCourse): Promise<Course> {
+    const [course] = await db.insert(courses).values(courseData).returning();
+    return course;
+  }
+
+  async updateCourse(id: number, courseData: Partial<InsertCourse>): Promise<Course> {
+    const [updatedCourse] = await db
+      .update(courses)
+      .set({ ...courseData, updatedAt: new Date() })
+      .where(eq(courses.id, id))
+      .returning();
+    return updatedCourse;
+  }
+
+  async deleteCourse(id: number): Promise<void> {
+    await db.delete(courses).where(eq(courses.id, id));
+  }
+
+  async incrementCourseStudents(courseId: number): Promise<void> {
+    await db
+      .update(courses)
+      .set({
+        totalStudents: sql`${courses.totalStudents} + 1`,
+      })
+      .where(eq(courses.id, courseId));
+  }
+
+  async getAdminCourses(options: {
+    page: number;
+    limit: number;
+    search?: string;
+    isApproved?: boolean;
+    isPublished?: boolean;
+  }): Promise<{ courses: Course[]; total: number }> {
+    const { page, limit, search, isApproved, isPublished } = options;
+    const offset = (page - 1) * limit;
+    
+    let query = db.select().from(courses);
+    let countQuery = db.select({ count: count() }).from(courses);
+    
+    // Apply filters
+    const conditions = [];
+    
+    if (search) {
+      conditions.push(
+        or(
+          like(courses.title, `%${search}%`),
+          like(courses.description, `%${search}%`)
+        )
+      );
+    }
+    
+    if (typeof isApproved === 'boolean') {
+      conditions.push(eq(courses.isApproved, isApproved));
+    }
+    
+    if (typeof isPublished === 'boolean') {
+      conditions.push(eq(courses.isPublished, isPublished));
+    }
+    
+    if (conditions.length > 0) {
+      const whereClause = conditions.reduce((acc, condition) => and(acc, condition));
+      query = query.where(whereClause);
+      countQuery = countQuery.where(whereClause);
+    }
+    
+    // Get total count
+    const [{ count: total }] = await countQuery;
+    
+    // Get courses with pagination
+    const coursesList = await query
+      .orderBy(desc(courses.createdAt))
+      .limit(limit)
+      .offset(offset);
+    
+    return {
+      courses: coursesList,
+      total: Number(total),
+    };
+  }
+
+  // Sections and Lessons
+  async getCourseSections(courseId: number): Promise<Section[]> {
+    const sectionsData = await db
+      .select()
+      .from(sections)
+      .where(eq(sections.courseId, courseId))
+      .orderBy(asc(sections.order));
+    
+    // Get all lessons for this course in one query
+    const lessonsData = await db
+      .select()
+      .from(lessons)
+      .where(eq(lessons.courseId, courseId))
+      .orderBy(asc(lessons.order));
+    
+    // Group lessons by sectionId
+    const lessonsBySection: Record<number, Lesson[]> = {};
+    for (const lesson of lessonsData) {
+      if (!lessonsBySection[lesson.sectionId]) {
+        lessonsBySection[lesson.sectionId] = [];
+      }
+      lessonsBySection[lesson.sectionId].push(lesson);
+    }
+    
+    // Attach lessons to each section
+    return sectionsData.map(section => {
+      return {
+        ...section,
+        lessons: lessonsBySection[section.id] || [],
+      };
+    });
+  }
+
+  // Reviews
+  async getCourseReviews(courseId: number): Promise<Review[]> {
+    return db
+      .select()
+      .from(reviews)
+      .where(eq(reviews.courseId, courseId))
+      .orderBy(desc(reviews.createdAt));
+  }
+
+  async getUserCourseReview(userId: number, courseId: number): Promise<Review | undefined> {
+    const [review] = await db
+      .select()
+      .from(reviews)
+      .where(and(
+        eq(reviews.userId, userId),
+        eq(reviews.courseId, courseId)
+      ));
+    return review || undefined;
+  }
+
+  async getUserReviews(userId: number): Promise<Review[]> {
+    return db
+      .select()
+      .from(reviews)
+      .where(eq(reviews.userId, userId))
+      .orderBy(desc(reviews.createdAt));
+  }
+
+  async createReview(reviewData: InsertReview): Promise<Review> {
+    const [review] = await db.insert(reviews).values(reviewData).returning();
+    
+    // Update course rating
+    await this.updateCourseRating(reviewData.courseId);
+    
+    return review;
+  }
+
+  private async updateCourseRating(courseId: number): Promise<void> {
+    const [result] = await db
+      .select({
+        avgRating: sql`avg(${reviews.rating})`.as("avgRating"),
+        count: count().as("count"),
+      })
+      .from(reviews)
+      .where(eq(reviews.courseId, courseId));
+    
+    const avgRating = result?.avgRating || 0;
+    const totalRatings = Number(result?.count) || 0;
+    
+    await db
+      .update(courses)
+      .set({ 
+        averageRating: avgRating, 
+        totalRatings: totalRatings,
+      })
+      .where(eq(courses.id, courseId));
+  }
+
+  // Enrollments
+  async getUserEnrollments(userId: number): Promise<Enrollment[]> {
+    return db
+      .select()
+      .from(enrollments)
+      .where(eq(enrollments.userId, userId))
+      .orderBy(desc(enrollments.enrolledAt));
+  }
+
+  async getUserCourseEnrollment(userId: number, courseId: number): Promise<Enrollment | undefined> {
+    const [enrollment] = await db
+      .select()
+      .from(enrollments)
+      .where(and(
+        eq(enrollments.userId, userId),
+        eq(enrollments.courseId, courseId)
+      ));
+    return enrollment || undefined;
+  }
+
+  async createEnrollment(enrollmentData: InsertEnrollment): Promise<Enrollment> {
+    const [enrollment] = await db.insert(enrollments).values(enrollmentData).returning();
+    
+    // Increment course students count
+    await this.incrementCourseStudents(enrollmentData.courseId);
+    
+    return enrollment;
+  }
+
+  // Progress
+  async getUserRecentProgress(userId: number): Promise<any[]> {
+    const userProgressTable = alias(userLessonProgress, 'progress');
+    const courseAlias = alias(courses, 'course');
+    const lessonAlias = alias(lessons, 'lesson');
+    
+    return db
+      .select({
+        progress: userProgressTable,
+        course: {
+          id: courseAlias.id,
+          title: courseAlias.title,
+          slug: courseAlias.slug,
+          thumbnail: courseAlias.thumbnail,
+        },
+        lesson: {
+          id: lessonAlias.id,
+          title: lessonAlias.title,
+        },
+      })
+      .from(userProgressTable)
+      .innerJoin(courseAlias, eq(userProgressTable.courseId, courseAlias.id))
+      .innerJoin(lessonAlias, eq(userProgressTable.lessonId, lessonAlias.id))
+      .where(eq(userProgressTable.userId, userId))
+      .orderBy(desc(userProgressTable.lastWatched))
+      .limit(5);
+  }
+
+  // Orders
+  async getUserOrders(userId: number): Promise<Order[]> {
+    return db
+      .select()
+      .from(orders)
+      .where(eq(orders.userId, userId))
+      .orderBy(desc(orders.createdAt));
+  }
+
+  async createOrder(orderData: InsertOrder): Promise<Order> {
+    const [order] = await db.insert(orders).values(orderData).returning();
+    return order;
+  }
+
+  async getRecentOrders(): Promise<Order[]> {
+    return db
+      .select()
+      .from(orders)
+      .orderBy(desc(orders.createdAt))
+      .limit(10);
+  }
+
+  // Admin Stats
+  async getAdminStats(): Promise<{
+    usersCount: number;
+    coursesCount: number;
+    ordersCount: number;
+    revenue: number;
+    usersChange: number;
+    coursesChange: number;
+    ordersChange: number;
+    revenueChange: number;
+  }> {
+    // Current date
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfPrevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const endOfPrevMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+    
+    // Get counts for current month
+    const [currentUsers] = await db
+      .select({ count: count() })
+      .from(users)
+      .where(gte(users.createdAt, startOfMonth));
+    
+    const [totalUsers] = await db
+      .select({ count: count() })
+      .from(users);
+    
+    const [currentCourses] = await db
+      .select({ count: count() })
+      .from(courses)
+      .where(gte(courses.createdAt, startOfMonth));
+    
+    const [totalCourses] = await db
+      .select({ count: count() })
+      .from(courses);
+    
+    const [currentOrders] = await db
+      .select({ count: count() })
+      .from(orders)
+      .where(gte(orders.createdAt, startOfMonth));
+    
+    const [totalOrders] = await db
+      .select({ count: count() })
+      .from(orders);
+    
+    const [currentRevenue] = await db
+      .select({ sum: sum(orders.amount) })
+      .from(orders)
+      .where(gte(orders.createdAt, startOfMonth));
+    
+    const [totalRevenue] = await db
+      .select({ sum: sum(orders.amount) })
+      .from(orders);
+    
+    // Get counts for previous month
+    const [prevUsers] = await db
+      .select({ count: count() })
+      .from(users)
+      .where(and(
+        gte(users.createdAt, startOfPrevMonth),
+        lte(users.createdAt, endOfPrevMonth)
+      ));
+    
+    const [prevCourses] = await db
+      .select({ count: count() })
+      .from(courses)
+      .where(and(
+        gte(courses.createdAt, startOfPrevMonth),
+        lte(courses.createdAt, endOfPrevMonth)
+      ));
+    
+    const [prevOrders] = await db
+      .select({ count: count() })
+      .from(orders)
+      .where(and(
+        gte(orders.createdAt, startOfPrevMonth),
+        lte(orders.createdAt, endOfPrevMonth)
+      ));
+    
+    const [prevRevenue] = await db
+      .select({ sum: sum(orders.amount) })
+      .from(orders)
+      .where(and(
+        gte(orders.createdAt, startOfPrevMonth),
+        lte(orders.createdAt, endOfPrevMonth)
+      ));
+    
+    // Calculate percentage changes
+    const usersChange = prevUsers.count === 0 ? 100 : 
+      Math.round(((Number(currentUsers.count) - Number(prevUsers.count)) / Number(prevUsers.count)) * 100);
+    
+    const coursesChange = prevCourses.count === 0 ? 100 : 
+      Math.round(((Number(currentCourses.count) - Number(prevCourses.count)) / Number(prevCourses.count)) * 100);
+    
+    const ordersChange = prevOrders.count === 0 ? 100 : 
+      Math.round(((Number(currentOrders.count) - Number(prevOrders.count)) / Number(prevOrders.count)) * 100);
+    
+    const revenueChange = (prevRevenue.sum || 0) === 0 ? 100 : 
+      Math.round(((Number(currentRevenue.sum || 0) - Number(prevRevenue.sum || 0)) / Number(prevRevenue.sum || 0)) * 100);
+    
+    return {
+      usersCount: Number(totalUsers.count),
+      coursesCount: Number(totalCourses.count),
+      ordersCount: Number(totalOrders.count),
+      revenue: Number(totalRevenue.sum || 0),
+      usersChange,
+      coursesChange,
+      ordersChange,
+      revenueChange,
+    };
+  }
+
+  async getRevenueByMonth(year: number): Promise<{ name: string; value: number }[]> {
+    const results = [];
+    
+    // Get all orders for the specified year
+    const startDate = new Date(year, 0, 1);
+    const endDate = new Date(year, 11, 31, 23, 59, 59);
+    
+    const allOrders = await db
+      .select()
+      .from(orders)
+      .where(and(
+        gte(orders.createdAt, startDate),
+        lte(orders.createdAt, endDate)
+      ));
+    
+    // Initialize revenue for all months
+    const monthNames = ["T1", "T2", "T3", "T4", "T5", "T6", "T7", "T8", "T9", "T10", "T11", "T12"];
+    const monthlyRevenue: Record<string, number> = {};
+    
+    for (const monthName of monthNames) {
+      monthlyRevenue[monthName] = 0;
+    }
+    
+    // Sum revenues by month
+    for (const order of allOrders) {
+      const month = order.createdAt.getMonth();
+      const monthName = monthNames[month];
+      monthlyRevenue[monthName] += order.amount;
+    }
+    
+    // Create result array
+    for (const monthName of monthNames) {
+      results.push({
+        name: monthName,
+        value: monthlyRevenue[monthName],
+      });
+    }
+    
+    return results;
+  }
+
+  // Testimonials
+  async getTestimonials(): Promise<any[]> {
+    const recentReviews = await db
+      .select({
+        review: reviews,
+        user: {
+          id: users.id,
+          fullName: users.fullName,
+          avatar: users.avatar,
+          role: users.role,
+        },
+        course: {
+          id: courses.id,
+          title: courses.title,
+        },
+      })
+      .from(reviews)
+      .innerJoin(users, eq(reviews.userId, users.id))
+      .innerJoin(courses, eq(reviews.courseId, courses.id))
+      .where(isNotNull(reviews.content))
+      .orderBy(desc(reviews.createdAt))
+      .limit(6);
+    
+    return recentReviews.map(item => ({
+      id: item.review.id,
+      content: item.review.content,
+      rating: item.review.rating,
+      name: item.user.fullName,
+      avatarUrl: item.user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(item.user.fullName)}`,
+      role: item.user.role === 'instructor' ? 'Giảng viên' : 'Học viên',
+      courseTitle: item.course.title,
+    }));
+  }
+}
+
+export const storage = new DatabaseStorage();
