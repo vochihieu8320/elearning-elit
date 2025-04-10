@@ -1,9 +1,9 @@
 // API Configuration
 
 // Base API URL
-export const API_BASE_URL = 'https://elearningnew.cybersoft.edu.vn/api';
+export const API_BASE_URL = 'https://elearning0706.cybersoft.edu.vn/api';
 
-export const ADMIN_BASE_URL = "http://localhost:3001/auth"
+export const ADMIN_BASE_URL = "http://localhost:3002/auth"
 
 // Auth Endpoints
 export const AUTH_ENDPOINTS = {
