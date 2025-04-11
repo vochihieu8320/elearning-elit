@@ -120,7 +120,7 @@ export default function UserPage() {
                   <td className="px-4 py-2 text-center border border-gray-300">{user.taiKhoan}</td>
                   <td className="px-4 py-2 text-center border border-gray-300">{user.hoTen}</td>
                   <td className="px-4 py-2 text-center border border-gray-300">{user.email}</td>
-                  <td className="px-4 py-2 text-center border border-gray-300">{user.soDT}</td>
+                  <td className="px-4 py-2 text-center border border-gray-300">{user.soDt}</td>
                   <td className="px-4 py-2 text-center border border-gray-300">{user.maLoaiNguoiDung}</td>
                   <td className="px-4 py-2 text-center border border-gray-300">
                     <div className="flex items-center justify-center gap-2">

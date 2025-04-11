@@ -40,7 +40,7 @@ export default function EditUserModal({
         matKhau: user.matKhau || "",
         hoTen: user.hoTen || "",
         email: user.email || "",
-        soDt: user.soDT || "",
+        soDt: user.soDt || "",
         maLoaiNguoiDung: user.maLoaiNguoiDung || "",
         maNhom: user.maNhom || "GP01",
       });

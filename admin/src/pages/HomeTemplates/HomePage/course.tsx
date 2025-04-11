@@ -8,7 +8,7 @@ export default function CourseCard(props: CourseProps) {
     <div>
       <h3>{course?.tenKhoaHoc}</h3>
       <img src={course?.hinhAnh} width={400} height={400} style={{borderRadius:10, objectFit:'cover'}} alt="" />
-      <p>{course?.mota}</p>
+      <p>{course?.moTa}</p>
     </div>
   )
 }

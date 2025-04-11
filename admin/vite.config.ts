@@ -7,5 +7,8 @@ export default defineConfig({
   base: '/admin/', // Set the base path for the admin app
   server: {
     port: 3002,
-  }
+  },
+  resolve: {
+    dedupe: ['react', 'react-dom', 'react-redux'], // FIX BUG
+  },
 })
