@@ -1,10 +1,24 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import path from "path";
+import { fileURLToPath } from "url"; // Import fileURLToPath
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Serve static files for the admin project
+const adminDistPath = path.resolve(__dirname, "../admin/dist");
+app.use("/admin", express.static(adminDistPath));
+
+// Catch-all route for admin to serve index.html
+app.get("/admin/*", (req, res) => {
+  res.sendFile(path.join(adminDistPath, "index.html"));
+});
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -61,6 +75,6 @@ app.use((req, res, next) => {
   // It is the only port that is not firewalled.
   const port = 3001;
   server.listen(port, () => {
-    log(`serving on port ${port}`);
+    console.log(`Server is running on http://localhost:${port}`);
   });
 })();

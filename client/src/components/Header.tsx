@@ -258,7 +258,7 @@ export default function Header() {
                     <>
                       <DropdownMenuItem>
                         <a
-                          href={ADMIN_BASE_URL}
+                          href="/admin/auth"
                           className="flex w-full"
                           target="_blank"
                           rel="noopener noreferrer"
