@@ -11,6 +11,23 @@ app.use(express.urlencoded({ extended: false }));
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+app.get("/", (req, res) => {
+  const filePath = path.join(clientDistPath, "index.html");
+  res.sendFile(filePath, (err) => {
+    if (err) {
+      console.error(`Error serving file: ${err.message}`);
+      res.status(500).send("Internal Server Error");
+    }
+  });
+});
+
+app.use((req, res, next) => {
+  if (req.path.endsWith("/")) {
+    req.url = req.url.slice(0, -1); // Remove trailing slash
+  }
+  next();
+});
+
 // Serve static files for the admin project
 const adminDistPath = path.resolve(__dirname, "../admin/dist");
 app.use("/admin", express.static(adminDistPath));
@@ -18,6 +35,37 @@ app.use("/admin", express.static(adminDistPath));
 // Catch-all route for admin to serve index.html
 app.get("/admin/*", (req, res) => {
   res.sendFile(path.join(adminDistPath, "index.html"));
+});
+
+const clientDistPath = path.resolve(__dirname, "../client/dist");
+app.use(express.static(clientDistPath));
+
+// Catch-all route to serve index.html for client-side routing
+app.get("/*", (req, res, next) => {
+  let requestedPath = req.path;
+
+  // If the request is for a static file, let express.static handle it
+  if (
+    requestedPath.endsWith(".js") ||
+    requestedPath.endsWith(".css") ||
+    requestedPath.endsWith(".map") ||
+    requestedPath.endsWith(".png") ||
+    requestedPath.endsWith(".jpg") ||
+    requestedPath.endsWith(".svg")
+  ) {
+    console.log("Static file request, passing to express.static");
+    return next();
+  }
+
+  // Serve the index.html file for all other routes
+  const filePath = path.join(clientDistPath, "index.html");
+  res.sendFile(filePath, (err) => {
+    console.log("filepath", filePath);
+    if (err) {
+      console.error(`Error serving file: ${err.message}`);
+      res.status(500).send("Internal Server Error");
+    }
+  });
 });
 
 app.use((req, res, next) => {
